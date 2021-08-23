@@ -1,0 +1,429 @@
+---
+title: "Private education and English rugby"
+author: "Alexander Lawless"
+date: "17 August 2021"
+output: 
+  html_document:
+    theme: cerulean
+    toc: TRUE
+    toc_float: TRUE
+    toc_collapsed: TRUE
+    toc_depth: 4
+    number_sections: false
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 9, fig.height = 6)
+
+setwd("/Users/alexlawless/Documents/R/Premiership_players_school/Premiership_players_education")
+
+library(tidyverse)
+library(janitor)
+library(png)
+library(grid)
+library(patchwork)
+
+##set theme settings
+theme_AL <- function (base_size){
+    theme_minimal(
+      #base_family = "Segoe UI",
+      base_size=12
+    ) %+replace%
+      theme(axis.title = element_text(size=11, face="bold"),
+            plot.title = element_text(hjust=0,face="bold",size=12,margin=margin(b=4,unit="pt")),
+            plot.subtitle = element_text(hjust=0,face="italic",size=10,margin=margin(b=4,unit="pt")),
+            plot.caption = element_text(hjust = 0,face="italic",size=10,margin=margin(b=4,unit="pt")),
+            legend.text = element_text(size=10),
+            legend.title = element_text(face="bold",size=11,margin=margin(b=4,unit="pt")))
+  }
+
+theme_set(theme_AL())
+
+# `orange` = My_rgb2hex(248,191,7),# "#f9bf07",
+# `charcoal` = My_rgb2hex(44,40,37),# "#2c2825",
+# `slate` = My_rgb2hex(104,111,115), # "#686f73",
+# `blue` = My_rgb2hex(88,29,193), # "#5881c1",
+# `red` = My_rgb2hex(236,101,85), # "#ec6555",
+
+## Import data ####
+# YouGov education 
+# https://docs.cdn.yougov.com/sahadddz8r/Copy%20of%20Internal_Education_210125.pdf 
+
+education_reference <-
+  tribble(
+  ~type, ~count, ~fee_paying,
+  "Private", 253, "Yes",    
+  "State non-selective", 2074, "No",
+  "State selective", 646, "No",
+  "State specialist school", 33, "No", 
+  "Other", 70, "No",
+  "Don’t Know", 79, "No"
+  )
+
+education_reference %>% 
+  group_by(fee_paying) %>% 
+  summarise(n = sum(count)) %>% 
+  mutate(prop = n/sum(n)*100)
+
+## Sutton Trust Charity report: Elitist Britian 
+# Rugby statistics made up of English, Welsh and Scottish autumn international teams 
+# https://www.suttontrust.com/our-research/elitist-britain-2019/ 
+
+sutton_trust <-
+  tribble(
+    ~sport, ~prop, ~fee_paying,
+    "Cricket (men)", 43, "Yes", 
+    "Cricket (men)", 57, "No", 
+    "Cricket (women)", 35, "Yes", 
+    "Cricket (women)", 65, "No", 
+    "Rugby (men)", 37, "Yes", 
+    "Rugby (men)", 63, "No", 
+    "Rugby (women)", 13, "Yes", 
+    "Rugby (women)", 87, "No", 
+    "Olympic Medallists", 31, "Yes", 
+    "Olympic Medallists", 69, "No", 
+    "Football (men)", 5, "Yes", 
+    "Football (men)", 95, "No", 
+    "Football (women)", 2, "Yes", 
+    "Football (women)", 98, "No"
+    )
+  
+players_appearances <- 
+  read_csv("Player_appearences_comb.csv") %>% 
+  clean_names()
+
+players_education <-
+  read_csv("Premiership_players_long.csv") %>% 
+  clean_names() %>% 
+  select(1:5) %>% 
+  drop_na(fee_paying) %>% 
+  left_join(players_appearances %>% 
+              select(-position), by = c("player", "team")) %>% 
+  mutate(position_desc = 
+           case_when(
+             position == 1 ~ "Prop",
+             position == 2 ~ "Hooker",
+             position == 3 ~ "Prop",
+             position == 4 ~ "Second row",
+             position == 5 ~ "Second row",
+             position == 6 ~ "Flanker",
+             position == 7 ~ "Flanker",
+             position == 8 ~ "No. 8",
+             position == 9 ~ "Scrum half",
+             position == 10 ~ "Fly half",
+             position == 11 ~ "Winger",
+             position == 12 ~ "Centre",
+             position == 13 ~ "Centre",
+             position == 14 ~ "Winger",
+             position == 15 ~ "Full back",
+             position == 16 ~ "Sub - Front row",
+             position == 17 ~ "Sub - Front row",
+             position == 18 ~ "Sub - Front row",
+             position == 19 ~ "Sub - Utility forward",
+             position == 20 ~ "Sub - Scrum half",
+             position == 21 ~ "Sub - Fly half",
+             position %in% c(22, 23) ~ "Sub - Utilty back"
+           )) %>% 
+  mutate(position_desc = fct_reorder(position_desc,position))
+
+## Educational inequality in rugby ####
+# proportion from state or fee-paying school - all players
+players_education_summary <-
+players_education %>% 
+  group_by(fee_paying) %>% 
+  summarise(n_rugby = n()) 
+
+players_education_summary_ref <-
+players_education_summary %>%
+  mutate(
+    n_rugby = 
+      n_rugby + (players_education_summary$n_rugby[players_education_summary$fee_paying == "Unknown"]/2)
+         ) %>% 
+  filter(fee_paying != "Unknown") %>%  # Unknown's split and applied evenly
+  mutate(Rugby_players = round(n_rugby/sum(n_rugby)*100,0)) %>% 
+  left_join(education_reference %>% 
+              group_by(fee_paying) %>% 
+              summarise(n_ref = sum(count)) %>% 
+              mutate(Population = round(n_ref/sum(n_ref)*100,0)), 
+            by = c("fee_paying")) %>% 
+  select(fee_paying, Rugby_players, Population) %>% 
+  pivot_longer(cols = -fee_paying) %>% 
+  mutate(label = paste0(value,"%")) 
+
+education_comparason_sutton <-
+players_education_summary_ref %>% 
+  union(
+    sutton_trust %>% 
+      select(fee_paying, sport, prop) %>% 
+      rename(name = sport,
+             value = prop) %>% 
+      mutate(label = paste0(value,"%"))) %>% 
+  mutate(alpha = case_when(name == "Rugby_players" ~ "Y",
+                           name == "Population" ~ "Y",
+                           TRUE ~ "N")) %>% 
+  mutate(name = case_when(name == "Rugby_players" ~ "Rugby: Prem players",
+                          name == "Rugby (men)" ~ "Rugby (men): National",
+                          name == "Rugby (men)" ~ "Rugby (women): National",
+                          TRUE ~ name
+                          )) %>% 
+  mutate(order = replace(min_rank(value), fee_paying =='Yes', 0)) 
+
+
+# proportion from state or fee-paying school - by team
+fee_paying_proportion_by_team <-
+  players_education %>% 
+    group_by(team, fee_paying) %>% 
+    summarise(n = n()) %>%
+    mutate(prop = n/sum(n)*100) %>% 
+    filter(fee_paying == "Yes") %>% 
+    ungroup() %>% 
+    
+    ggplot(aes(x = reorder(team, -prop), y = prop, fill = team)) +
+    geom_col(fill = "#6baed6", colour = "grey") +
+    theme(axis.text.x = element_text(angle = 90)) +
+    ylim(0,100) +
+    labs(x = "Team", y = "Proportion players privately educated",
+         title = "3 in every 4 players for Sale attended a fee paying school",
+         subtitle = "Proportion of players that attended fee-paying secondary school by Premiership squad; Round 1 2021/22 season",
+         caption = "Twitter: @alexanderlawless92, Github: alexanderlawless")
+
+# add team logos
+bath_img <- readPNG("logos/bath.png", native = TRUE)
+sale_img <- readPNG("logos/sale.png", native = TRUE)
+worcester_img <- readPNG("logos/worcester.png", native = TRUE)
+london_irish_img <- readPNG("logos/london_irish.png", native = TRUE)
+wasps_img <- readPNG("logos/wasps.png", native = TRUE)
+gloucester_img <- readPNG("logos/gloucester.png", native = TRUE)
+northampton_img <- readPNG("logos/northampton.png", native = TRUE)
+newcastle_img <- readPNG("logos/newcastle.png", native = TRUE)
+harlequins_img <- readPNG("logos/harlequins.png", native = TRUE)
+bristol_img <- readPNG("logos/bristol.png", native = TRUE)
+leicester_img <- readPNG("logos/leicester.png", native = TRUE)
+exeter_img <- readPNG("logos/exeter.png", native = TRUE)
+
+# Final standings 
+# https://en.wikipedia.org/wiki/2020%E2%80%9321_Premiership_Rugby 
+final_standings <-
+  tribble(
+    ~club, ~played, ~won, ~drawn, ~lost, ~points_for, ~points_against, ~points_diff, ~tries_for, ~tries_against, ~try_bonus, ~losing_bonus, ~points, ~standing, ~club_short,
+    "Bristol Bears",	      22,	17,	1,  4, 561, 379,  182, 75, 42, 13, 2,	85, 3,  "Bristol",	   
+    "Exeter Chiefs",	      22,	17,	0,  5, 624, 356,  268, 93, 40, 12, 2,	82, 2,  "Exeter",	   
+    "Sale Sharks",	        22,	16,	0,  6, 537, 401,  136, 64, 42,  5, 5,	74, 4,  "Sale",	     
+    "Harlequins",	        22,	13,	1,  8, 703, 564,  139, 89, 77, 11, 4,	71, 1,  "Harlequins",	     
+    "Northampton Saints",	22,	11,	0, 11, 469, 457,   12, 59, 57,  6, 5,	57, 5,  "Northampton",
+    "Leicester Tigers",	  22,	11,	0, 11, 478, 492,  -14, 51, 62,  5, 3,	54, 6,  "Leicester",
+    "Bath",	              22,	10,	0, 12, 494, 604, -110, 61, 82,  8, 4,	52, 7,  "Bath",	           
+    "Wasps",	              22,	 9, 0, 13, 539, 624,  -85, 66, 72,  7, 7,	50, 8,  "Wasps",	           
+    "London Irish",	      22,	 6, 2, 14, 439, 531,  -92, 53, 68,  9, 5,	48, 9,  "London Irish",	   
+    "Newcastle Falcons",	  22,	 9, 0, 13, 385, 512, -127, 50, 70,  3, 2,	45, 10, "Newcastle",
+    "Gloucester",	        22,	 7, 0, 15, 450, 518,  -68, 56, 66,  6, 7,	45, 11, "Gloucester",	     
+    "Worcester Warriors", 	22,	 4, 0, 18, 326, 567, -241, 39, 78,  3, 8,	27, 12, "Worcester"
+  )
+
+proportion_by_standing <-
+  players_education %>% 
+  group_by(team, fee_paying) %>% 
+  summarise(n = n()) %>%
+  mutate(prop = n/sum(n)*100) %>% 
+  filter(fee_paying == "Yes") %>% 
+  ungroup() %>% 
+  left_join(final_standings %>% 
+              select(club, club_short, standing, points_diff), 
+            by = c("team" = "club_short")) %>% 
+  mutate(final_standing_2 = 
+           case_when(
+             standing == 1 ~ paste0(standing, "st"),
+             standing == 2 ~ paste0(standing, "nd"),
+             standing == 3 ~ paste0(standing, "rd"),
+             TRUE ~ paste0(standing, "th")
+           )) %>% 
+  mutate(final_standing_2 = fct_reorder(final_standing_2, -standing))
+
+# players by position and school type 
+# scatter plot
+players_education %>% 
+  ggplot(aes(x = position_desc, y = apps, colour = fee_paying)) +
+  geom_point(size = 2.5) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(x = "Position", 
+       y = "Appearances for club",
+       colour = "Fee-paying school?",
+       title = "...",
+       subtitle = "Appearances for club by position and education; Round 1 2021/22 season",
+       caption = "Twitter: @alexanderlawless92, Github: alexanderlawless")
+
+# Stacked bar chart
+position_education_summary <-
+players_education %>% 
+  group_by(position_desc, fee_paying) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  mutate(forward_back = 
+           case_when(
+             position_desc %in% c(
+               "Hooker", "Prop", "Second row", "Flanker", "No. 8", "Sub - Utility forward",
+               "Sub - Front row") ~ "Forward",
+             position_desc %in% c(
+               "Scrum half", "Fly half", "Centre", "Winger", "Full back", "Sub - Scrum half", 
+               "Sub - Fly half", "Sub - Utilty back") ~ "Back"))
+
+```
+
+## Introduction
+
+Small disclaimer to start: **I have a well developed inferiority complex when it comes to rugby in England**
+
+As a state-school educated club rugby player throughout my youth, I played with and against privately educated affluent boys on many a Sunday morning. They were always seemed to be better than me! Big, physical, loud and very very confident. I'm clearly still bitter.
+
+With a new-born baby and a subsequently subdued social life, I have been painstakingly googling players, checking their wikipedia and searching for club page profiles to identify each players highschool education type (state or private). 
+
+I took a cross-sectional of English Premiership players by focusing on the starting 23-man squads in Round 1 of the 2020/21 season. 275 players were considered; for 39 (14%) players, education information was unavailable.  
+
+<https://www.premiershiprugby.com/gallagher-premiership-rugby/fixtures-results/>
+
+Below is a short summary displaying the skewwed playing population of England's high level rugby players. A game for all shapes and sizes - not all social groups or education types. 
+
+## State or private education 
+
+```{r, Proportion of players attending private school}
+players_education_summary_ref %>% 
+  ggplot(aes(x = name, y = value, fill = fee_paying, label = label)) +
+  geom_col(width = 0.75, colour = "grey") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5)) +
+  annotate("text", x = 2.45, y = 19, size = 5, fontface = 2, 
+           label = "Premiership rugby players") +
+  annotate("text", x = 1.45, y = 15, size = 5, fontface= 2, 
+           label = "All English students") +
+  coord_flip() +
+  scale_fill_manual(values = c("#cf7282",
+                               "#6baed6")) +
+  theme(axis.text = element_blank()) +
+  labs(x = "",
+       y = "",
+       fill = "Fee paying school?",
+       title = "Private education is extremely over-represented in high level rugby players",
+       subtitle = "Comparative proportions of attendance at private and state schools in English professional rugby players and the wider population ",
+       caption = "Note: Population reference data from YouGov purposefully-sampled poll,
+Twitter: @alexanderlawless92, Github: alexanderlawless")
+```
+
+Unfortunately, this result wasn't all that surprising to me and probably won't be for others. That is the problem. 
+
+Population reference data source: <https://docs.cdn.yougov.com/sahadddz8r/Copy%20of%20Internal_Education_210125.pdf>
+
+## Sutton Trust data comparison
+
+The Sutton Trust released the 'Elitist Britain' report in 2019, highlighting the educational backgrounds of Britain's leading people and industries. 
+
+<https://www.suttontrust.com/our-research/elitist-britain-2019/>
+
+The below graph incorporates Sutton Trust data alongside that of the above graph for additional context.
+
+```{r}
+education_comparason_sutton %>% 
+  ggplot(aes(x = reorder(name, -order), 
+             y = value, 
+             fill = fee_paying, 
+             label = label, 
+             alpha = alpha)) +
+  geom_col(width = 0.75, colour = "grey") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5)) +
+  # annotate("text", x = 2.45, y = 100, size = 3, fontface = 2, label = "Premiership rugby players") +
+  coord_flip() +
+  scale_alpha_manual(values = c(0.5, 1), guide = "none") +
+  scale_fill_manual(values = c("#cf7282",
+                               "#6baed6")) +
+  theme(axis.text.x =  element_blank()) +
+  labs(x = "",
+       y = "",
+       fill = "Fee paying school?",
+       title = "Premiership rugby players are the most educationally unequal player groups",
+       subtitle = "Attendance at private and state schools in English professional rugby players and the wider population",
+       caption = "Note: Population reference data from YouGov purposefully-sampled poll,
+Twitter: @alexanderlawless92, Github: alexanderlawless")
+```
+
+The proportion of privately educated players is higher in English Premiership players than the Sutton trust estimate of "Rugby (men) National" which considers the national teams of England, Scotland and Wales. Scotland and Wales have much more equitable entry routes into professional rugby and as such lower the proportion considerably.
+
+## Private education by team 
+
+```{r}
+fee_paying_proportion_by_team +
+  inset_element(p = sale_img, left = 0.0,  right = 0.083, bottom = 0.80, top = 0.90) +
+  inset_element(p = worcester_img, left = 0.083,  right = 0.1666, bottom = 0.80, top = 0.90) +
+  inset_element(p = london_irish_img, left = 0.1666,  right = 0.2499, bottom = 0.80, top = 0.90) +
+  inset_element(p = wasps_img, left = 0.2499,  right = 0.3332, bottom = 0.80, top = 0.90) +
+  inset_element(p = bath_img, left = 0.3332,  right = 0.4165, bottom = 0.80, top = 0.90) +
+  inset_element(p = gloucester_img, left = 0.4165,  right = 0.4998, bottom = 0.80, top = 0.90) +
+  inset_element(p = northampton_img, left = 0.4998,  right = 0.5831, bottom = 0.80, top = 0.90) +
+  inset_element(p = newcastle_img, left = 0.5831,  right = 0.6664, bottom = 0.80, top = 0.90) +
+  inset_element(p = harlequins_img, left = 0.6664,  right = 0.7497, bottom = 0.80, top = 0.90) +
+  inset_element(p = bristol_img, left = 0.7497,  right = 0.833, bottom = 0.80, top = 0.90) +
+  inset_element(p = leicester_img, left = 0.833,  right = 0.9163, bottom = 0.80, top = 0.90) +
+  inset_element(p = exeter_img, left = 0.9163,  right = 0.9996, bottom = 0.80, top = 0.90) 
+```
+
+The proportion of privately educated players vary by team but all show vast over-representation of fee-paying education; this is most notable in Sale Sharks where near 75% of players are privately educated. This is not a feature of the local population of Sale and is likely a function of similar (or even exaggerated) educational inequities in professional rugby in South Africa, where a considerable number of Sale's players come from. 
+
+## Education types and position
+
+```{r, message = FALSE}
+# Education proportion by position
+position_education_summary %>% 
+  group_by(position_desc) %>% 
+  mutate(prop = n/sum(n)*100) %>%
+  select(position_desc, fee_paying, n, prop) %>% 
+  union(
+    position_education_summary %>% 
+      group_by(forward_back, fee_paying) %>%
+      summarise(n = sum(n)) %>% 
+      mutate(prop = n/sum(n)*100) %>% 
+      rename(position_desc = forward_back)
+  ) %>% 
+  mutate(alpha = 
+           case_when(
+             position_desc %in% c("Forward" , "Back") ~ "B",
+             TRUE ~ "A"
+           )) %>% 
+  ungroup() %>% 
+  mutate(position_desc = factor(position_desc, levels = c(
+    "Hooker", "Prop", "Second row", "Flanker", "No. 8", 
+    "Scrum half", "Fly half", "Centre", "Winger", "Full back",
+    "Sub - Front row", "Sub - Utility forward", "Sub - Scrum half", 
+    "Sub - Fly half", "Sub - Utilty back", "Forward", "Back")
+    )) %>% 
+  
+  ggplot(aes(x = position_desc, y = prop, fill = fee_paying, label = n, alpha = alpha)) +
+  geom_col(position = "stack") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_fill_manual(values = c("#cf7282",
+                               "728ecf",
+                               "#6baed6")) +
+  #geom_text(position = position_stack(vjust = 0.5)) +
+  scale_alpha_manual(values = c(0.7, 1), guide = "none") +
+  labs(x = "Position",
+       y = "Proporiton",
+       fill = "Fee-paying school?",
+       title = "There are no clear trend in educational proportions by position",
+       subtitle = "Proportion and count of players by education and position; Round 1 2021/22 season",
+       caption = "Twitter: @alexanderlawless92, Github: alexanderlawless")
+```
+
+## Education profile and league standing
+
+```{r, message = FALSE}
+proportion_by_standing %>% 
+  ggplot(aes(x = prop, y = final_standing_2, group = 1)) + 
+  geom_point(aes(size = points_diff),fill = "#6baed6", colour = "grey", pch = 21) +
+  geom_smooth(method = "lm", se = FALSE, colour = "#cf7282") +
+  scale_size_continuous(range = c(4, 15)) +
+  labs(x = "Proportion players privately educated",
+       y = "Final league position",
+       size = "Points difference",
+       title = "Teams with less privately educated players finished higher in the league",
+       subtitle = "The proportion of privately educated players by the team's final league standing and their points difference, 2020/21 season",
+       caption = "Twitter: @alexanderlawless92, Github: alexanderlawless")
+```
+
+Interesting, here we see a negative correlation between the proporiton of privately educated players (selected in round 1) and the team's final league position. This poses more questions than it answers but at a high level, the relationship is clear.
